@@ -1,0 +1,47 @@
+schemaVersion: "2"
+kind: mixin
+name: dotnet-sdk
+
+permissions:
+  network:
+    allow:
+      # .NET installer
+      - dot.net
+      - builds.dotnet.microsoft.com
+      - download.visualstudio.microsoft.com
+
+      # NuGet
+      - nuget.org
+      - "*.nuget.org"
+
+      # GitLab (git remote + glab CLI)
+      - gitlab.com
+      - "*.gitlab.com"
+
+      # Claude Code plugin marketplaces (ponytail, account-badge)
+      - github.com
+
+setup:
+  install:
+    - command: |
+        set -eux
+
+        curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+        chmod +x dotnet-install.sh
+
+        ./dotnet-install.sh \
+          --channel 10.0 \
+          --install-dir /usr/share/dotnet
+
+        ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
+
+        dotnet --info
+
+    - command: |
+        set -eux
+
+        claude plugin marketplace add DietrichGebert/ponytail
+        claude plugin install ponytail@ponytail
+
+        claude plugin marketplace add CNSteuerwald/account-badge
+        claude plugin install account-badge@account-badge
