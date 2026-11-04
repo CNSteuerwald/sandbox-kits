@@ -37,8 +37,11 @@ setup:
 
         dotnet --info
 
-    - command: |
+    # Run as the sandbox's agent user; as root the plugins land in /root/.claude and Claude never sees them.
+    - user: agent
+      command: |
         set -eux
+        export HOME=/home/agent
 
         claude plugin marketplace add DietrichGebert/ponytail
         claude plugin install ponytail@ponytail
