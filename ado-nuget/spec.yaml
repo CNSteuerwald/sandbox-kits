@@ -1,0 +1,119 @@
+# syntax=docker/sandbox-kit:3
+# v3 mixin: the claude agent now ships as a v3 kit, and a sandbox can't mix v3 with v1/v2 kits.
+schemaVersion: "3"
+kind: mixin
+displayName: .NET SDK + Azure Artifacts NuGet
+description: .NET 10 SDK, Azure DevOps NuGet feed auth, and the ponytail and account-badge Claude Code plugins
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      # Only open while the install hooks below run.
+      install:
+        allow:
+          # .NET installer (ci.dot.net serves the "latest version" lookup)
+          - dot.net
+          - ci.dot.net
+          - builds.dotnet.microsoft.com
+          - download.visualstudio.microsoft.com
+          # Debian packages (libicu, which .NET needs and the hardened image lacks)
+          - deb.debian.org
+          # Node.js (OpenSpec needs >= 22.12; the image has no Node and Debian's is older) + OpenSpec from npm
+          - nodejs.org
+          - registry.npmjs.org
+          # Claude Code plugin marketplaces (ponytail, account-badge)
+          - github.com
+      runtime:
+        allow:
+          # .NET installer
+          - dot.net
+          - builds.dotnet.microsoft.com
+          - download.visualstudio.microsoft.com
+
+          # NuGet
+          - nuget.org
+          - "*.nuget.org"
+
+          # Azure Artifacts NuGet feed; package downloads redirect to signed blob URLs (no auth needed)
+          - pkgs.dev.azure.com
+          - agdna.pkgs.visualstudio.com # legacy feed URL the GFFB solution uses
+          - "*.vsblob.vsassets.io"
+          - "*.blob.core.windows.net"
+
+          # GitLab (git remote + glab CLI)
+          - gitlab.com
+          - "*.gitlab.com"
+
+          # Claude Code plugin marketplaces (ponytail, account-badge)
+          - github.com
+
+  # Host side: store base64(":<PAT>") (needs Packaging: Read), not the raw PAT:
+  #   [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":<PAT>"))   then   sbx secret set ado-nuget
+  - type: com.docker.sandbox/credential@1
+    description: Azure DevOps PAT for the Azure Artifacts NuGet feed
+    config:
+      service: ado-nuget
+      phase: runtime
+      apiKey:
+        proxyManaged: true # no `name`: the PAT never appears in the container
+        # sbx ignores `scheme: basic` in v3 kits, so build the Basic header ourselves.
+        inject:
+          - domain: pkgs.dev.azure.com
+            header: Authorization
+            format: "Basic %s"
+          - domain: agdna.pkgs.visualstudio.com
+            header: Authorization
+            format: "Basic %s"
+
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        - description: Install the .NET 10 SDK
+          command: |
+            set -eux
+
+            # The v3 claude image is a minimal hardened Debian without ICU; .NET aborts without it.
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              "$(apt-cache search --names-only '^libicu[0-9]+$' | cut -d' ' -f1 | sort -V | tail -1)"
+
+            curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+            chmod +x dotnet-install.sh
+
+            ./dotnet-install.sh \
+              --channel 10.0 \
+              --install-dir /usr/share/dotnet
+
+            ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
+
+            dotnet --info
+
+        - description: Install Node.js 22 LTS and OpenSpec
+          command: |
+            set -eux
+
+            case "$(uname -m)" in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; *) arch="$(uname -m)" ;; esac
+            base=https://nodejs.org/dist/latest-v22.x
+            curl -fsSL "$base/SHASUMS256.txt" -o SHASUMS256.txt
+            file="$(grep -o "node-v[0-9.]*-linux-$arch\.tar\.gz" SHASUMS256.txt | head -1)"
+            curl -fsSL "$base/$file" -o "$file"
+            grep " $file\$" SHASUMS256.txt | sha256sum -c -
+            tar -xzf "$file" -C /usr/local --strip-components=1 --exclude='*.md' --exclude=LICENSE
+            rm -f "$file" SHASUMS256.txt
+
+            npm install -g @fission-ai/openspec@latest
+            node --version
+            openspec --version
+
+        # Run as the sandbox's agent user; as root the plugins land in /root/.claude and Claude never sees them.
+        - description: Install the ponytail and account-badge Claude Code plugins
+          user: agent
+          command: |
+            set -eux
+            export HOME=/home/agent
+
+            claude plugin marketplace add DietrichGebert/ponytail
+            claude plugin install ponytail@ponytail
+
+            claude plugin marketplace add CNSteuerwald/account-badge
+            claude plugin install account-badge@account-badge

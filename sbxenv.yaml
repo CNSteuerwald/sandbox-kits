@@ -1,0 +1,54 @@
+# Docker Sandboxes environment file for the ado-nuget kit in this repo (ado-nuget/spec.yaml).
+# `sbx env` is experimental; the file format may change. Docs:
+# https://docs.docker.com/ai/sandboxes/configuration/environment-files/
+#
+# USAGE
+#   Equivalent of: sbx create claude --name my-sandbox --kit C:\Dev\sandbox-kits\ado-nuget .
+#   Run from the project you want mounted (not from this repo), passing this file's path:
+#
+#     sbx env plan   C:/Dev/sandbox-kits/sbxenv.yaml   # preview, changes nothing
+#     sbx env create C:/Dev/sandbox-kits/sbxenv.yaml   # create the sandbox without attaching
+#     sbx env run    C:/Dev/sandbox-kits/sbxenv.yaml   # create (if needed) and attach
+#     sbx env exec   C:/Dev/sandbox-kits/sbxenv.yaml -- dotnet test
+#     sbx env rm     C:/Dev/sandbox-kits/sbxenv.yaml   # show destroy plan, remove sandbox
+#
+#   Add `--name <name>` to any command to override the sandbox name (default: my-sandbox).
+#
+# NOTES
+#   - Uses the ado-nuget kit (./ado-nuget/spec.yaml, a v3 mixin): .NET 10 SDK, Node 22 + OpenSpec,
+#     Azure Artifacts NuGet auth, and the ponytail and account-badge plugins. A sandbox can't mix
+#     v3 kits with v1/v2 kits, so don't add the root spec.yaml kit alongside it.
+#   - One-time host setup for the NuGet feed: store base64(":<PAT>") (Packaging: Read), then
+#       [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":<PAT>"))
+#       sbx secret set ado-nuget
+#     The PAT is injected by the proxy and never appears inside the sandbox.
+#   - Don't run from this repo: the workspace is your current directory, and the docs recommend
+#     keeping the env file outside every mounted directory so the agent can't edit it.
+#   - To use the published kit instead of the local one, swap in the git+https line below and run
+#       sbx settings set kit.allowedSources '["docker.io/","github.com/CNSteuerwald/"]'
+#     (this replaces the whole allowlist; Docker Hub is allowed by default).
+#   - Optional per-user overrides (no name, workspace under project dir): ~/.sbxenv.yaml
+
+schemaVersion: "1"
+name: my-sandbox
+agent: claude
+
+# Same as the "." in `sbx create`: the project directory you run sbx from.
+workspace: ${{ env.projectDir }}
+
+kits:
+  - ./ado-nuget
+  # - git+https://github.com/CNSteuerwald/sandbox-kits.git#subdirectory=ado-nuget
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+sandboxOptions:
+  cpus: 4
+  memory: 8g
+
+# Kestrel's default HTTP port in .NET 10 (ASP.NET Core apps).
+ports:
+  - sandbox: 5000
+    host: 5000
